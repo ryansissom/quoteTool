@@ -1,21 +1,21 @@
 import os
-import xlwings as xw
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
 from fuzzywuzzy import fuzz, process
+import tkinter.font as tkFont
+import csv
 
-# Global variable to store the selected row
-selected_row = None
+# Global dictionary to store selected rows for each treeview
+selected_rows = {
+    "tree1": None,
+    "tree2": None
+}
 
 def open_matcher():
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
     csv_file = os.path.join(script_dir, 'Store Parts Inventory.csv')
-
-    # Import data from Excel
-    wb = xw.Book.caller() if xw.Book.caller() else xw.Book('demo.xlsm')
-    sht = wb.sheets['Sheet1']
 
     # Get the data from the csv
     df = pd.read_csv(csv_file)
@@ -50,12 +50,18 @@ def open_matcher():
     tree1_frame.pack(expand=True, fill='both', padx=10, pady=10)
 
     # Create a treeview for the first table
-    columns = ("Part Number", "Description", "Manufacturer", "Cost")
-    tree1 = ttk.Treeview(tree1_frame, columns=columns, show='headings')
+    columns_tree1 = ("Part Number", "Description", "Manufacturer", "Cost", "Quantity Available", "Lead Time")
+    tree1 = ttk.Treeview(tree1_frame, columns=columns_tree1, show='headings')
     
     # Define headings for the first table
-    for col in columns:
+    for col in columns_tree1:
         tree1.heading(col, text=col)
+
+    # Set column widths to fit the text size for tree1
+    font = tkFont.Font()
+    for col in columns_tree1:
+        max_width = max(font.measure(col), 100)  # Set a minimum width of 100
+        tree1.column(col, width=max_width, stretch=False)
 
     # Create a vertical scrollbar for tree1
     tree1_scrollbar = ttk.Scrollbar(tree1_frame, orient="vertical", command=tree1.yview)
@@ -66,7 +72,7 @@ def open_matcher():
     tree1_scrollbar.pack(side='right', fill='y')
     
     # Bind the selection event to a function
-    tree1.bind("<<TreeviewSelect>>", lambda event: on_tree_select(event, tree1))
+    tree1.bind("<<TreeviewSelect>>", lambda event: on_tree_select(event, tree1, "tree1"))
     
     # Create a frame for the buttons
     button_frame = ttk.Frame(root)
@@ -85,11 +91,18 @@ def open_matcher():
     tree2_frame.pack(expand=True, fill='both', padx=10, pady=10)
 
     # Create a treeview for the second table
-    tree2 = ttk.Treeview(tree2_frame, columns=columns, show='headings')
+    columns_tree2 = ("Part Number", "Description", "Manufacturer", "Cost", "Quantity", "Margin", "Total")
+    tree2 = ttk.Treeview(tree2_frame, columns=columns_tree2, show='headings')
     
     # Define headings for the second table
-    for col in columns:
+    for col in columns_tree2:
         tree2.heading(col, text=col)
+
+    # Set column widths to fit the text size for tree2
+    font = tkFont.Font()
+    for col in columns_tree2:
+        max_width = max(font.measure(col), 100)  # Set a minimum width of 100
+        tree2.column(col, width=max_width, stretch=False)
 
     # Create a vertical scrollbar for tree2
     tree2_scrollbar = ttk.Scrollbar(tree2_frame, orient="vertical", command=tree2.yview)
@@ -98,6 +111,9 @@ def open_matcher():
     # Pack the treeview and scrollbar
     tree2.pack(side='left', expand=True, fill='both')
     tree2_scrollbar.pack(side='right', fill='y')
+    
+    # Bind the selection event to a function
+    tree2.bind("<<TreeviewSelect>>", lambda event: on_tree_select(event, tree2, "tree2"))
     
     bottom_frame = ttk.Frame(root)
     bottom_frame.pack(fill='x', padx=10, pady=10)
@@ -115,8 +131,16 @@ def open_matcher():
     margin_entry.pack(side='left', padx=(0, 20))
 
     # Add an "Add to Quote" button at the bottom middle
-    add_to_quote_button = ttk.Button(bottom_frame, text="Add to Quote", command=lambda: add_to_quote(sht, entry.get(), quantity_entry.get(), margin_entry.get()))
+    add_to_quote_button = ttk.Button(bottom_frame, text="Add to Quote", command=lambda: add_to_quote(quantity_entry.get(), margin_entry.get(), tree2))
     add_to_quote_button.pack(side='left', padx=5)
+
+    # Add a "Delete" button at the bottom middle
+    delete_button = ttk.Button(bottom_frame, text="Delete", command=lambda: delete_selected_item(tree2))
+    delete_button.pack(side='left', padx=5)
+
+    # Add an "Export to CSV" button at the bottom middle
+    export_button = ttk.Button(bottom_frame, text="Export to CSV", command=lambda: export_to_csv(tree2))
+    export_button.pack(side='left', padx=5)
     
     root.mainloop()
 
@@ -140,44 +164,65 @@ def fuzzymatch(customer_desc, selected_manufacturer, tree1, min_score=70):
     # Insert matched items into tree1
     for match in filtered_matches:
         matched_row = df_csv[df_csv['Description'] == match[0]].iloc[0]
-        tree1.insert("", "end", values=(matched_row['Part Number'], match[0], matched_row['Provider'], matched_row['Weighted Average Cost']))
+        tree1.insert("", "end", values=(matched_row['Part Number'], match[0], matched_row['Provider'], matched_row['Weighted Average Cost'], matched_row['Parts Quantity'], 'data required'))
 
-def on_tree_select(event, tree):
-    global selected_row
+def on_tree_select(event, tree, tree_name):
+    global selected_rows
     selected_items = tree.selection()
     if selected_items:
         selected_item = selected_items[0]
-        selected_row = tree.item(selected_item, 'values')
+        selected_rows[tree_name] = tree.item(selected_item, 'values')
     else:
-        selected_row = None
+        selected_rows[tree_name] = None
         print("No item selected")
 
 def search_recommendations():
     print("Search Recommendations")
 
-def add_to_quote(sheet, entry_text, quantity, margin):
-    global selected_row
-    if selected_row and quantity and margin:
-        part_number = selected_row[0]
-        description = selected_row[1]
-        manufacturer = selected_row[2]
-        cost = selected_row[3]
-        # Convert margin to a percentage
-        margin_percentage = float(margin) / 100
-        # add to next blank row in the quote sheet
-        next_row = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row + 1
-        sheet.range('A' + str(next_row)).value = entry_text
-        sheet.range('B' + str(next_row)).value = next_row - 12
-        sheet.range('C' + str(next_row)).value = manufacturer
-        sheet.range('D' + str(next_row)).value = part_number
-        sheet.range('E' + str(next_row)).value = description
-        sheet.range('F' + str(next_row)).value = quantity
-        sheet.range('G' + str(next_row)).value = cost
-        sheet.range('H' + str(next_row)).value = margin_percentage
-        sheet.range('I' + str(next_row)).value = float(cost) * (1 + margin_percentage)
-        sheet.range('J' + str(next_row)).value = float(cost) * (1 + margin_percentage) * float(quantity)
+def add_to_quote(quantity, margin, tree2):
+    global selected_rows
+    if selected_rows["tree1"]:
+        part_number, description, manufacturer, cost, quantity_available, lead_time = selected_rows["tree1"]
+        try:
+            total = float(cost) * int(quantity) * (1 + float(margin) / 100)
+            total_rounded = round(total, 2)
+            tree2.insert("", "end", values=(part_number, description, manufacturer, cost, quantity, margin, total_rounded))
+            print(f"Added to quote: {selected_rows['tree1']} with quantity {quantity} and margin {margin}")
+        except ValueError as e:
+            print(f"Error calculating total: {e}")
     else:
-        print("Missing data")
+        print("No item selected in tree1")
+
+def delete_selected_item(tree2):
+    selected_item = tree2.selection()
+    if selected_item:
+        tree2.delete(selected_item)
+        print("Selected item deleted")
+    else:
+        print("No item selected in tree2")
+
+def export_to_csv(tree2):
+    # Get the current working directory
+    current_dir = os.getcwd()
+    # Define the file path
+    file_path = os.path.join(current_dir, "quote.csv")
+    
+    # Get all items from tree2
+    items = tree2.get_children()
+    # Get column names
+    columns = [tree2.heading(col)["text"] for col in tree2["columns"]]
+    
+    # Open a file for writing
+    with open(file_path, "w", newline="") as file:
+        writer = csv.writer(file)
+        # Write the column names
+        writer.writerow(columns)
+        # Write the data
+        for item in items:
+            values = tree2.item(item, "values")
+            writer.writerow(values)
+    
+    print(f"Data exported to {file_path}")
 
 if __name__ == "__main__":
     open_matcher()
