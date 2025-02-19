@@ -1,3 +1,4 @@
+import os
 import xlwings as xw
 import tkinter as tk
 from tkinter import ttk
@@ -8,11 +9,16 @@ from fuzzywuzzy import fuzz, process
 selected_row = None
 
 def open_matcher():
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_file = os.path.join(script_dir, 'Store Parts Inventory.csv')
+
     # Import data from Excel
-    wb = xw.Book('demo.xlsm')
+    wb = xw.Book.caller() if xw.Book.caller() else xw.Book('demo.xlsm')
     sht = wb.sheets['Sheet1']
+
     # Get the data from the csv
-    df = pd.read_csv('Store Parts Inventory.csv')
+    df = pd.read_csv(csv_file)
     manufacturers = sorted(df['Provider'].dropna().astype(str).unique().tolist())
 
     root = tk.Tk()
@@ -115,7 +121,9 @@ def open_matcher():
     root.mainloop()
 
 def fuzzymatch(customer_desc, selected_manufacturer, tree1, min_score=70):
-    df_csv = pd.read_csv('Store Parts Inventory.csv')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_file = os.path.join(script_dir, 'Store Parts Inventory.csv')
+    df_csv = pd.read_csv(csv_file)
     
     if selected_manufacturer:
         df_csv = df_csv[df_csv['Provider'] == selected_manufacturer]
@@ -136,8 +144,13 @@ def fuzzymatch(customer_desc, selected_manufacturer, tree1, min_score=70):
 
 def on_tree_select(event, tree):
     global selected_row
-    selected_item = tree.selection()[0]
-    selected_row = tree.item(selected_item, 'values')
+    selected_items = tree.selection()
+    if selected_items:
+        selected_item = selected_items[0]
+        selected_row = tree.item(selected_item, 'values')
+    else:
+        selected_row = None
+        print("No item selected")
 
 def search_recommendations():
     print("Search Recommendations")
